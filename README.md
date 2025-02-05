@@ -1,2 +1,2 @@
-# r_studio_phd
-Git repository for r codes regarding my PhD work
+# RNA-seq Healthy vs RA & non-TNF vs TNF
+Git repository for r codes regarding RNA-seq analysis
