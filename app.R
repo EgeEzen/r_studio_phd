@@ -20,6 +20,7 @@ library(dplyr)
 library(ggtext)
 library(envalysis)
 library(ggsignif)
+library(ggthemes)
 
 # read the data 
 # the list goes like nrm_counts_copy,mat_copy,results_vs_df, metadata
@@ -42,12 +43,16 @@ ui <- fluidPage(
                          options = list(placeholder = "Type to search gene...")),
           actionButton("healthy_update", "Draw Plot"),
           tags$hr(),
+          selectInput("healthy_shape_option", "Shape of dots by:", 
+                      choices = c("None" = "none", "Joint" = "Joint", "Sex" = "Gender"), 
+                      selected = "none"),
+          tags$hr(),
           div(
             actionButton("toggleSettings", "Settings for Download", icon = icon("cogs")),
             conditionalPanel(
               condition = "input.toggleSettings % 2 == 1",  # Toggle visibility based on button click
-              numericInput("healthy_width", "Plot Width (inches)", value = 4, min = 3, max = 20, step = 0.5),
-              numericInput("healthy_height", "Plot Height (inches)", value = 4, min = 3, max = 20, step = 0.5)
+              numericInput("healthy_width", "Plot Width (inches)", value = 6, min = 3, max = 20, step = 0.5),
+              numericInput("healthy_height", "Plot Height (inches)", value = 6, min = 3, max = 20, step = 0.5)
             )
           ),
           downloadButton("download_healthyPlot", "Download Plot as PNG"),
@@ -68,12 +73,16 @@ ui <- fluidPage(
                          options = list(placeholder = "Type to search gene...")),
           actionButton("tnf_update", "Draw Plot"),
           tags$hr(),
+          selectInput("tnf_shape_option", "Shape of dots by:", 
+                      choices = c("None" = "none", "Joint" = "Joint", "Sex" = "Gender"), 
+                      selected = "none"),
+          tags$hr(),
           div(
             actionButton("toggleSettings", "Settings for Download", icon = icon("cogs")),
             conditionalPanel(
               condition = "input.toggleSettings % 2 == 1",  # Toggle visibility based on button click
-              numericInput("tnf_width", "Plot Width (inches)", value = 4, min = 3, max = 20, step = 0.5),
-              numericInput("tnf_height", "Plot Height (inches)", value = 4, min = 3, max = 20, step = 0.5)
+              numericInput("tnf_width", "Plot Width (inches)", value = 6, min = 3, max = 20, step = 0.5),
+              numericInput("tnf_height", "Plot Height (inches)", value = 6, min = 3, max = 20, step = 0.5)
             )
           ),
           downloadButton("download_tnfPlot", "Download Violin Plot as PNG"),
@@ -116,6 +125,7 @@ server <- function(input, output, session) {
     gene_of_interest <- input$healthy_gene
     nrm_counts_copy <- healthy_vs_ra_data[[1]]
     results_vs_df <- healthy_vs_ra_data[[3]]
+    metadata <- healthy_vs_ra_data[[4]]
     
     #prepare df for dotplot
     nrm_counts_filtered <- nrm_counts_copy[rownames(nrm_counts_copy) == gene_of_interest,,drop=FALSE]
@@ -123,6 +133,9 @@ server <- function(input, output, session) {
     nrm_counts_filtered <- rownames_to_column(nrm_counts_filtered, var = "Sample") 
     nrm_counts_filtered$Condition <- ifelse(grepl("Healthy",nrm_counts_filtered$Sample), "Healthy", "RA") 
     colnames(nrm_counts_filtered) <- c("Sample","Counts","Condition") 
+    nrm_counts_filtered$Joint <- metadata$joint
+    nrm_counts_filtered$Gender <- metadata$gender
+
     checking_condition <- (results_vs_df[rownames(results_vs_df) == gene_of_interest,,drop=FALSE ])$padj
     
     if (nrow(nrm_counts_filtered) == 0) {
@@ -133,33 +146,40 @@ server <- function(input, output, session) {
       })
     } else {
       # Render the dot plot 
+      shape_aes <- if (input$healthy_shape_option == "none") NULL else sym(input$healthy_shape_option)
+      healthy_colors <- c("Healthy" = "#A5B68D", "RA" = "#A888B5")
       
       output$healthyPlot <- renderPlot({
-        if (checking_condition <= 0.05){ # with significance
+        if (!is.na(checking_condition) && checking_condition <= 0.05){ # with significance
           ggplot(nrm_counts_filtered, aes(x = Condition, y = Counts, fill = Condition)) +
             geom_violin(trim = TRUE, alpha = 0.8) + 
-            geom_jitter(width = 0.2, size = 1, alpha = 0.6, color = "black") +
+            scale_fill_manual(values = healthy_colors) + 
+            geom_jitter(aes(shape = !!shape_aes), width = 0.2, size = 2, alpha = 0.6, color = "black") +
             labs(title = paste0("Gene Expression of\n", gene_of_interest," in Healthy vs RA"), 
                  x = "Condition", y = "Normalized Counts") +
-            theme_publish() +
             ylim(NA, max(nrm_counts_filtered$Counts) * 1.2)+
             theme(axis.text.x = element_text(angle = 45, hjust = 1),  
-                  legend.position = "none") +
-            geom_signif(comparisons = list(c("Healthy", "RA")), # TNF non TNF or Healthy Ra
+                  legend.position = "right") +
+            theme_few() +
+            geom_signif(comparisons = list(c("Healthy", "RA")), 
                                annotations = "*",  # Star for significance
                                y_position = max(nrm_counts_filtered$Counts) * 1.05, 
-                               tip_length = 0.02, textsize = 7)
+                               tip_length = 0.02, textsize = 7) +
+            guides(fill = "none") 
+          
         }
         else {#without significance
-          
           ggplot(nrm_counts_filtered, aes(x = Condition, y = Counts, fill = Condition)) +
             geom_violin(trim = TRUE, alpha = 0.8) + 
-            geom_jitter(width = 0.2, size = 1, alpha = 0.6, color = "black") +
+            scale_fill_manual(values = healthy_colors) + 
+            geom_jitter(aes(shape = !!shape_aes), width = 0.2, size = 2, alpha = 0.6, color = "black") +
             labs(title = paste0("Gene Expression of\n", gene_of_interest," in Healthy vs RA"), 
                  x = "Condition", y = "Normalized Counts") +
-            theme_publish() +
+            theme_few() +
             theme(axis.text.x = element_text(angle = 45, hjust = 1),  
-                  legend.position = "none")  
+                  legend.position = "right")  +
+            guides(fill = "none")  
+          
           
         }
         
@@ -197,15 +217,20 @@ server <- function(input, output, session) {
     gene_of_interest <- input$tnf_gene
     nrm_counts_copy <- tnf_vs_nontnf_data[[1]]
     results_vs_df <- tnf_vs_nontnf_data[[3]]
+    metadata <- tnf_vs_nontnf_data[[4]]
     
     #prepare df for dotplot
     nrm_counts_filtered <- nrm_counts_copy[rownames(nrm_counts_copy) == gene_of_interest,,drop=FALSE]
     nrm_counts_filtered <- as.data.frame(t(nrm_counts_filtered))
     nrm_counts_filtered <- rownames_to_column(nrm_counts_filtered, var = "Sample") 
     nrm_counts_filtered$Condition <- ifelse(grepl("TNF",nrm_counts_filtered$Sample), "TNF", "non-TNF") 
-    colnames(nrm_counts_filtered) <- c("Sample","Counts","Condition") 
-    checking_condition <- (results_vs_df[rownames(results_vs_df) == gene_of_interest,,drop=FALSE ])$padj
+    colnames(nrm_counts_filtered) <- c("Sample","Counts","Condition")
+    nrm_counts_filtered$Joint <- metadata$joint
+    nrm_counts_filtered$Gender <- metadata$gender
+    nrm_counts_filtered$ID <- gsub("[^0-9]", "", nrm_counts_filtered$Sample)
     
+    checking_condition <- (results_vs_df[rownames(results_vs_df) == gene_of_interest,,drop=FALSE ])$padj
+    print(typeof(checking_condition))
     if (nrow(nrm_counts_filtered) == 0) {
       output$tnfPlot <- renderPlot({
         ggplot() + 
@@ -214,34 +239,42 @@ server <- function(input, output, session) {
       })
     } else {
       # Render the dot plot 
+      shape_aes <- if (input$tnf_shape_option == "none") NULL else sym(input$tnf_shape_option)
+      tnf_colors <- c("TNF" = "#8174A0", "non-TNF" = "#F0C1E1")
       
       output$tnfPlot <- renderPlot({
-        if (checking_condition <= 0.05){ # with significance
+        if (!is.na(checking_condition) && checking_condition <= 0.05){ # with significance
           ggplot(nrm_counts_filtered, aes(x = Condition, y = Counts, fill = Condition)) +
             geom_violin(trim = TRUE, alpha = 0.8) + 
-            geom_jitter(width = 0.2, size = 1, alpha = 0.6, color = "black") +
+            scale_fill_manual(values = tnf_colors) + 
+            geom_point(aes(shape = !!shape_aes), size = 2, alpha = 0.6, color = "black") +
+            geom_line(aes(group = ID), alpha= 0.6,color = "black") +
             labs(title = paste0("Gene Expression of\n", gene_of_interest," in \nTNF vs non-TNF in RA"), 
                  x = "Condition", y = "Normalized Counts") +
-            theme_publish() +
+            theme_few() +
             ylim(NA, max(nrm_counts_filtered$Counts) * 1.2)+
             theme(axis.text.x = element_text(angle = 45, hjust = 1),  
-                  legend.position = "none") +
+                  legend.position = "right") +
             geom_signif(comparisons = list(c("non-TNF", "TNF")), # TNF non TNF or Healthy Ra
                         annotations = "*",  # Star for significance
                         y_position = max(nrm_counts_filtered$Counts) * 1.05, 
-                        tip_length = 0.02, textsize = 7)
+                        tip_length = 0.02, textsize = 7)+
+            guides(fill = "none") 
+          
         }
         else {#without significance
           
           ggplot(nrm_counts_filtered, aes(x = Condition, y = Counts, fill = Condition)) +
             geom_violin(trim = TRUE, alpha = 0.8) + 
-            geom_jitter(width = 0.2, size = 1, alpha = 0.6, color = "black") +
+            scale_fill_manual(values = tnf_colors) + 
+            geom_point(aes(shape = !!shape_aes), size = 2, alpha = 0.6, color = "black") +
+            geom_line(aes(group = ID), alpha= 0.6,color = "black") +
             labs(title = paste0("Gene Expression of\n", gene_of_interest," in \nTNF vs non-TNF in RA"), 
                  x = "Condition", y = "Normalized Counts") +
-            theme_publish() +
+            theme_few() +
             theme(axis.text.x = element_text(angle = 45, hjust = 1),  
-                  legend.position = "none")  
-          
+                  legend.position = "right")  +
+            guides(fill = "none") 
         }
         
       })
