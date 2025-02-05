@@ -40,8 +40,9 @@ metadata <- read.csv("metadata.csv",row.names=1)
 metadata$Nr. <- NULL
 
 # --------- # 
-#to do healthy vs ra (not tnf stimulated samples we have to get rid of TNF stimulated)
-metadata <- metadata[metadata$condition != "Stimulated", ]
+#to do healthy vs ra (not tnf stimulated samples we have to get rid of TNF stimulated and unstimulated)
+metadata <- metadata[metadata$condition == "not_applicable", ]
+metadata <- metadata[rownames(metadata) != "RA_377_old",] # this is a duplicate
 count_data <- count_data[,colnames(count_data) %in% rownames(metadata)]
 # -------#
 #to do tnf vs non-tnf
@@ -56,11 +57,11 @@ count_data <- count_data[,colnames(count_data) %in% rownames(metadata)]
 # for visualization batch effect remover will be used (only for visualization, not for d.g.e. analysis)
 dds <- DESeqDataSetFromMatrix(countData = count_data,
                               colData =  metadata,
-                              design = ~ technology + group) #group or condition!
+                              design = ~  technology + condition) #group or condition! if condition put alsotechnology
 #it will give warning message, ignore it (about the base, it will automatically convert to factors)
 
 #factor level is set here, this means that the base is now untreated (NS) condition
-dds$condition <- relevel(dds$group, ref = "Healthy") #Healthy or Non_stimulated
+dds$condition <- relevel(dds$condition, ref = "Non_stimulated") #Healthy or Non_stimulated
 
 #seeing the object
 dds
@@ -89,10 +90,11 @@ pheatmap(vsd_cor, annotation_col = metadata,
          main = "Hierarchical Heatmap", filename ="clustermap.png",width= 10, height = 8, show_rownames=FALSE, show_colnames = TRUE)
 #don't forget the change the name of the map (main argument)
 
-#you can also remove the batch effects here for visualization
+#you can also remove the batch effects here for visualization 
+#this is only for tnf vs nontnf
 vsd_copy <- vsd
 mat_copy <- assay(vsd_copy)
-mm <- model.matrix(~group, colData(vsd_copy)) #group or condition
+mm <- model.matrix(~condition, colData(vsd_copy)) #group or condition
 mat_copy <- removeBatchEffect(mat_copy, batch=vsd_copy$technology, design=mm)
 assay(vsd_copy) <- mat_copy
 #also for normalized counts
@@ -116,20 +118,24 @@ pcaData$condition <- ifelse(pcaData$condition == "not_applicable", "Not Applicab
 
 #ggthemr('pale', layout= 'clear')
 
-p <- ggplot(pcaData, aes(PC1, PC2, color=condition, label=group )) +
+p <- ggplot(pcaData, aes(PC1, PC2, color=condition, label=name )) +
   geom_point(size=5) +
   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
   ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
   coord_fixed() + labs(title= "PCA Plot") +
   geom_label_repel(fontface = "bold", nudge_x = 1, show.legend = FALSE) +
-  theme_publish()
+  theme_publish() +
+  theme(legend.position = "right") 
+  
+
+p
 
 ggsave(
   plot = p,
-  filename = "pca_after_be_removed.png",
+  filename = "pca_tnf_vs_nontnf_be_removed.png",
   bg = "transparent",
-  width = 6, height = 6
-)
+  width = 8, height = 8)
+
 
 #Don't use "color" in the legend, remember to change title of the plot
 #ggrepel is very useful if the annotations overlap
@@ -160,17 +166,21 @@ resultsNames(dds)
 
 # log shrinkage, apeglm method will be used (2018 paper)
 results_vs <- lfcShrink(dds,
-                         coef="group_RA_vs_Healthy",type="apeglm")
+                         coef="condition_Stimulated_vs_Non_stimulated",type="apeglm")
 #results to save 
 results_to_save <- as.data.frame(results_vs)
 results_to_save$gene <- rownames(results_to_save)
 # then you can save this file
-write_xlsx(results_to_save,"results_vs_healthy_vs_ra.xlsx" )
+write_xlsx(results_to_save,"results_vs_tnf_vs_nontnf.xlsx" )
 
 #save RDS for shiny app
 results_vs_df <- as.data.frame(results_vs)
-healthy_vs_ra_shiny <- list(nrm_counts_copy,mat_copy,results_vs_df, metadata)
+healthy_vs_ra_shiny <- list(nrm_counts,vsd_mat,results_vs_df, metadata)
+#or for tnf vs nontnf
+tnf_vs_nontnf_shinyapp <- list(nrm_counts_copy,mat_copy,results_vs_df, metadata)
+#save as rds
 saveRDS(healthy_vs_ra_shiny, file = "healthy_vs_ra_shiny.rds")
+saveRDS(tnf_vs_nontnf_shinyapp, file = "tnf_vs_nontnf_shinyapp.rds")
 #------------#
 
 # from now on continue the analysis with the shrinkage version of the results
@@ -188,11 +198,16 @@ resSig_with_fc1 <- subset(resSig, ((log2FoldChange >= 0.585) | (log2FoldChange <
 
 #getting the normalized counts for ONLY significant genes (then we will create a heatmap)
 resSig_with_normalized_counts <- merge(as.data.frame(resSig), as.data.frame(nrm_counts), by="row.names")
+#for tnf vs nontnf be removed normalized counts
 resSig_with_be_removed_normalized_counts <- merge(as.data.frame(resSig), as.data.frame(nrm_counts_copy), by="row.names")
 
 #exporting as xlsx
 write_xlsx(resSig_with_normalized_counts,"results_vs_sig_with_normalized_counts.xlsx")
 write_xlsx(resSig_with_be_removed_normalized_counts,"results_vs_sig_with_be_removed_normalized_counts.xlsx")
+
+#resSig with the vsd counts -> this is useful for visualization
+resSig_with_vsd_counts <- merge(as.data.frame(resSig), as.data.frame(vsd_mat), by="row.names")
+resSig_with_fc1_vsd_counts <- merge(as.data.frame(resSig_with_fc1), as.data.frame(vsd_mat), by="row.names")
 
 #resSig with the batch effect removed vsd counts -> this is useful for visualization
 resSig_with_be_removed_vsd_counts <- merge(as.data.frame(resSig), as.data.frame(mat_copy), by="row.names")
@@ -201,9 +216,9 @@ resSig_with_fc1_with_be_removed_vsd_counts <- merge(as.data.frame(resSig_with_fc
 # draw heatmap
 custom_colors <- colorRampPalette(c("blue", "white", "red"))(20)
 
-p1 <- pheatmap(resSig_with_be_removed_vsd_counts[,7:ncol(resSig_with_be_removed_vsd_counts)], cluster_rows=TRUE, show_rownames=FALSE,scale = "row",color = custom_colors,
+p1 <- pheatmap(resSig_with_fc1_with_be_removed_vsd_counts[,7:ncol(resSig_with_fc1_with_be_removed_vsd_counts)], cluster_rows=TRUE, show_rownames=FALSE,scale = "row",color = custom_colors,
          cluster_cols=TRUE, annotation_col=metadata[,"condition",drop=FALSE],width=10,height=10, #group or condition
-         main = "TNF vs Non-TNF\nin RA Heatmap",treeheight_row = 0) #healthy vs ra or tnf vs non tnf in ra
+         main = "Non-TNF vs TNF in RA Heatmap",treeheight_row = 0) #healthy vs ra or tnf vs non tnf in ra
 
 ggsave(
   plot = p1,
@@ -214,8 +229,8 @@ ggsave(
 
 #with lfc1
 p1 <- pheatmap(resSig_with_fc1_with_be_removed_vsd_counts[,7:ncol(resSig_with_fc1_with_be_removed_vsd_counts)], cluster_rows=TRUE, show_rownames=FALSE,scale = "row",color = custom_colors,
-         cluster_cols=TRUE, annotation_col=metadata[,"condition",drop=FALSE],width=10,height=10,
-         main = "TNF vs Non-TNF\nin RA Heatmap",treeheight_row = 0)
+         cluster_cols=TRUE, annotation_col=metadata[,"condition",drop=FALSE],width=10,height=10,#group or condition
+         main = "Non-TNF vs TNF in RA Heatmap",treeheight_row = 0)
 
 ggsave(
   plot = p1,
@@ -255,7 +270,7 @@ p <- ggplot(results_vs_df, aes(x = log2FoldChange, y = log_adjP)) +
   geom_vline(xintercept = c(-0.585,0.588), linetype = "dashed", color = "black") +
   geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
   labs(
-    title = "Differentially Expressed Genes TNF vs non-TNF in RA",
+    title = "Differentially Expressed Genes TNF vs non-TNF in RA", #change the name accordingly
     x = "Log2 Fold Change",
     y = "-log10(Adjusted P-Value)",
     fill = "Classification"
@@ -282,7 +297,7 @@ ggsave(
 
 # ------ draw dotplot for a specific gene ------ #
   
-gene_of_interest <- "ZFP36L1"
+gene_of_interest <- "CENPX"
 nrm_counts_filtered <- nrm_counts_copy[rownames(nrm_counts_copy) == gene_of_interest,,drop=FALSE]
 nrm_counts_filtered <- as.data.frame(t(nrm_counts_filtered))
 nrm_counts_filtered <- rownames_to_column(nrm_counts_filtered, var = "Sample") 
@@ -290,17 +305,20 @@ nrm_counts_filtered$Condition <- ifelse(grepl("Healthy",nrm_counts_filtered$Samp
 #or stimulated and unstimulated
 nrm_counts_filtered$Condition <- ifelse(grepl("TNF",nrm_counts_filtered$Sample), "TNF", "non-TNF") 
 colnames(nrm_counts_filtered) <- c("Sample","Counts","Condition") 
+nrm_counts_filtered$ID <- gsub("[^0-9]", "", nrm_counts_filtered$Sample)
 
 
 p <- ggplot(nrm_counts_filtered, aes(x = Condition, y = Counts, fill = Condition)) +
   geom_violin(trim = TRUE, alpha = 0.8) + 
-  geom_jitter(width = 0.2, size = 1, alpha = 0.6, color = "black") +
-  labs(title = paste0("Gene Expression of\n", gene_of_interest," in Healthy vs RA"), 
+  geom_point(width = 0.2, size = 1, alpha = 0.6, color = "black") +
+  geom_line(aes(group = ID), alpha= 0.6,color = "black") +
+  labs(title = paste0("Gene Expression of\n", gene_of_interest," in TNF vs non-TNF RA"), 
        x = "Condition", y = "Normalized Counts") +
   theme_publish() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),  
         legend.position = "none")  
 
+p
 
 checking_condition <- (results_vs_df[rownames(results_vs_df) == gene_of_interest,,drop=FALSE ])$padj
 if (checking_condition <= 0.05){
@@ -309,7 +327,8 @@ if (checking_condition <= 0.05){
                        y_position = max(nrm_counts_filtered$Counts) * 1.05, 
                        tip_length = 0.02, textsize = 7)
 }
-  
+
+p
 ggsave(
   plot = p,
   filename = paste0("dotplot_of_",gene_of_interest,".png"),
@@ -320,6 +339,7 @@ ggsave(
 # --------- heatmap from selected genes ------- #
 
 selected_genes <- c("RBPJ","AGAP2-AS1","ZFP36L1")
+#mat_copy_filtered <- vsd_mat[rownames(vsd_mat) %in% selected_genes, ,drop=FALSE] #for healthy vs ra
 mat_copy_filtered <- mat_copy[rownames(mat_copy) %in% selected_genes, ,drop=FALSE]
 
 #for the TNF vs nonTNF you have re-order the columns
@@ -331,7 +351,7 @@ mat_copy_filtered <- mat_copy_filtered[, ordered_samples]  # Reorder matrix colu
 custom_colors <- colorRampPalette(c("blue", "white", "red"))(10)
 
 p1 <- pheatmap(mat_copy_filtered, cluster_rows=TRUE, show_rownames=TRUE,show_colnames = FALSE,scale = "row",color = custom_colors,
-               cluster_cols=FALSE, annotation_col=metadata[,"condition",drop=FALSE],width=10,height=10, #group or condition
+               cluster_cols=FALSE, annotation_col=metadata[,"group",drop=FALSE],width=10,height=10, #group or condition
                main = "Heatmap of Selected Genes\nin RA and Healthy",treeheight_row = 0)
 
 ggsave(
